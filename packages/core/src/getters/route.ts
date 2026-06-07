@@ -9,7 +9,7 @@ import type {
 } from '../types';
 import { camel, isObject, isString, sanitize } from '../utils';
 
-function isBaseUrlRuntime(
+export function isBaseUrlRuntime(
   baseUrl: string | BaseUrlFromConstant | BaseUrlFromSpec | BaseUrlRuntime,
 ): baseUrl is BaseUrlRuntime {
   return (

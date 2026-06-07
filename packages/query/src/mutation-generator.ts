@@ -1,6 +1,8 @@
 import {
   camel,
   generateMutator,
+  isBaseUrlRuntime,
+  getFullRoute,
   type GeneratorImport,
   type GeneratorMutator,
   type GeneratorOptions,
@@ -9,6 +11,8 @@ import {
   type InvalidateTarget,
   type InvalidateTargetParam,
   isString,
+  type NormalizedOutputOptions,
+  type OpenApiServerObject,
   type OutputHttpClient,
   pascal,
   type Verbs,
@@ -69,10 +73,12 @@ interface OperationRouteInfo {
   method: string;
   /** true when the route has path params that lack a default value */
   hasRequiredPathParams: boolean;
+  servers?: OpenApiServerObject[];
 }
 
 interface SpecPathItem {
   parameters?: SpecParameter[];
+  servers?: OpenApiServerObject[];
   [method: string]: unknown;
 }
 
@@ -111,9 +117,15 @@ const findOperationInfo = (
       if (!opId) continue;
       // Match both raw operationId and its camelCase generated name
       if (opId !== operationName && camel(opId) !== operationName) continue;
+      const servers = pathItem.servers;
 
       if (!routePath.includes('{')) {
-        return { route: routePath, method, hasRequiredPathParams: false };
+        return {
+          route: routePath,
+          method,
+          hasRequiredPathParams: false,
+          servers,
+        };
       }
 
       // Collect path parameters from both path-level and operation-level
@@ -126,7 +138,7 @@ const findOperationInfo = (
         (p) => p.schema?.default === undefined && p.default === undefined,
       );
 
-      return { route: routePath, method, hasRequiredPathParams };
+      return { route: routePath, method, hasRequiredPathParams, servers };
     }
   }
   return undefined;
@@ -149,6 +161,22 @@ const getStaticRoutePrefix = (route: string): string | undefined => {
     .split('/')
     .some((segment) => segment.length > 0);
   return hasLiteralSegment ? prefix : undefined;
+};
+
+const getInvalidationRoutePrefix = (
+  info: OperationRouteInfo,
+  spec: Record<string, unknown> | undefined,
+  baseUrl: NormalizedOutputOptions['baseUrl'],
+): string | undefined => {
+  const prefix = getStaticRoutePrefix(info.route);
+  if (prefix === undefined) return undefined;
+  if (!baseUrl || isBaseUrlRuntime(baseUrl)) return prefix;
+
+  return getFullRoute(
+    prefix,
+    info.servers ?? (spec?.servers as OpenApiServerObject[] | undefined),
+    baseUrl,
+  );
 };
 
 export const getMutationOptionsUrl = (
@@ -269,6 +297,7 @@ const createGenerateInvalidateCall = (
   spec: Record<string, unknown> | undefined,
   shouldSplitQueryKey: boolean,
   useOperationIdAsQueryKey: boolean,
+  baseUrl: NormalizedOutputOptions['baseUrl'],
 ) => {
   return (target: NormalizedTarget): string => {
     const method =
@@ -287,7 +316,7 @@ const createGenerateInvalidateCall = (
       // Route has required path parameters (no defaults) – use broad
       // invalidation instead of calling the query key function without
       // the required arguments.
-      const prefix = getStaticRoutePrefix(info.route);
+      const prefix = getInvalidationRoutePrefix(info, spec, baseUrl);
 
       // When the prefix has no meaningful literal segments (e.g. route
       // starts with a path param like /{tenantId}/...), fall through to
@@ -513,6 +542,7 @@ ${
           context.spec,
           !!query.shouldSplitQueryKey,
           !!query.useOperationIdAsQueryKey,
+          context.output.baseUrl,
         ),
         uniqueInvalidates,
       })
