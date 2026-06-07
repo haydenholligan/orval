@@ -442,6 +442,94 @@ describe('parseZodValidationSchemaDefinition with params injection', () => {
     expect(zod).toContain('zod.string().email()');
   });
 
+  it('emits top-level string format validators for zod v4 definitions', () => {
+    const input: ZodValidationSchemaDefinition = {
+      functions: [
+        [
+          'object',
+          {
+            createdAt: {
+              functions: [
+                ['string', undefined],
+                ['iso.datetime', undefined],
+              ],
+              consts: [],
+            },
+            email: {
+              functions: [
+                ['string', undefined],
+                ['email', undefined],
+              ],
+              consts: [],
+            },
+            id: {
+              functions: [
+                ['string', undefined],
+                ['uuid', undefined],
+              ],
+              consts: [],
+            },
+            url: {
+              functions: [
+                ['string', undefined],
+                ['url', undefined],
+              ],
+              consts: [],
+            },
+          },
+        ],
+      ],
+      consts: [],
+    };
+
+    const { zod } = parseZodValidationSchemaDefinition(
+      input,
+      ctx,
+      false,
+      false,
+      true,
+    );
+
+    expect(zod).toContain('"createdAt": zod.iso.datetime()');
+    expect(zod).toContain('"email": zod.email()');
+    expect(zod).toContain('"id": zod.uuid()');
+    expect(zod).toContain('"url": zod.url()');
+    expect(zod).not.toContain('zod.string().iso.datetime');
+    expect(zod).not.toContain('zod.string().email');
+    expect(zod).not.toContain('zod.string().uuid');
+    expect(zod).not.toContain('zod.string().url');
+  });
+
+  it('preserves string coercion for zod v4 top-level string formats', () => {
+    const input: ZodValidationSchemaDefinition = {
+      functions: [
+        [
+          'object',
+          {
+            email: {
+              functions: [
+                ['string', undefined],
+                ['email', undefined],
+              ],
+              consts: [],
+            },
+          },
+        ],
+      ],
+      consts: [],
+    };
+
+    const { zod } = parseZodValidationSchemaDefinition(
+      input,
+      ctx,
+      true,
+      false,
+      true,
+    );
+
+    expect(zod).toContain('"email": zod.coerce.string().pipe(zod.email())');
+  });
+
   it('propagates fieldPath through tuple positions without appending indices', () => {
     // A tuple like `[string, number]` under `coords` propagates the container's
     // fieldPath (`['coords']`) unchanged to every position. The `validator`
@@ -1657,6 +1745,104 @@ describe('generateZodValidationSchemaDefinition`', () => {
       expect(parsed.zod).toContain('.regex(');
       expect(parsed.zod).not.toContain('.stringFormat(');
     }
+  });
+
+  it('emits top-level string format validators in v4', () => {
+    const schema: OpenApiSchemaObject = {
+      type: 'object',
+      properties: {
+        createdAt: { type: 'string', format: 'date-time' },
+        email: { type: 'string', format: 'email' },
+        id: { type: 'string', format: 'uuid' },
+        url: { type: 'string', format: 'uri' },
+      },
+    };
+
+    const result = generateZodValidationSchemaDefinition(
+      schema,
+      {
+        output: {
+          override: {
+            useDates: false,
+            zod: {
+              dateTimeOptions: {},
+            },
+          },
+        },
+      } as ContextSpec,
+      'example',
+      true,
+      true,
+      { required: true },
+    );
+
+    const parsed = parseZodValidationSchemaDefinition(
+      result,
+      {
+        output: {
+          override: {
+            useDates: false,
+          },
+        },
+      } as ContextSpec,
+      false,
+      true,
+      true,
+    );
+
+    expect(parsed.zod).toContain('"createdAt": zod.iso.datetime({})');
+    expect(parsed.zod).toContain('"email": zod.email()');
+    expect(parsed.zod).toContain('"id": zod.uuid()');
+    expect(parsed.zod).toContain('"url": zod.url()');
+    expect(parsed.zod).not.toContain('zod.string().iso.datetime');
+    expect(parsed.zod).not.toContain('zod.string().email');
+    expect(parsed.zod).not.toContain('zod.string().uuid');
+    expect(parsed.zod).not.toContain('zod.string().url');
+  });
+
+  it('preserves string coercion for generated v4 string format validators', () => {
+    const schema: OpenApiSchemaObject = {
+      type: 'object',
+      properties: {
+        email: { type: 'string', format: 'email' },
+      },
+    };
+
+    const result = generateZodValidationSchemaDefinition(
+      schema,
+      {
+        output: {
+          override: {
+            useDates: false,
+            zod: {
+              dateTimeOptions: {},
+            },
+          },
+        },
+      } as ContextSpec,
+      'example',
+      true,
+      true,
+      { required: true },
+    );
+
+    const parsed = parseZodValidationSchemaDefinition(
+      result,
+      {
+        output: {
+          override: {
+            useDates: false,
+          },
+        },
+      } as ContextSpec,
+      true,
+      true,
+      true,
+    );
+
+    expect(parsed.zod).toContain(
+      '"email": zod.coerce.string().pipe(zod.email())',
+    );
   });
 
   it('generates hostname validator in v4 for hostname format', () => {

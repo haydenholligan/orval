@@ -819,6 +819,8 @@ export const generateZodValidationSchemaDefinition = (
             }
             break;
           }
+
+          functions.push([type as string, undefined]);
         } else {
           if ('const' in schema) {
             functions.push(['literal', `"${schema.const}"`]);
@@ -1153,6 +1155,29 @@ const PARAMS_MERGE_INTO_OPTIONS_VALIDATORS = new Set([
   'iso.time',
 ]);
 
+const ZOD_V4_TOP_LEVEL_STRING_FORMATS = new Set([
+  'email',
+  'url',
+  'uuid',
+  'hostname',
+  'stringFormat',
+  'emoji',
+  'base64',
+  'base64url',
+  'nanoid',
+  'cuid',
+  'cuid2',
+  'ulid',
+  'ipv4',
+  'ipv6',
+  'cidrv4',
+  'cidrv6',
+  'iso.date',
+  'iso.time',
+  'iso.datetime',
+  'iso.duration',
+]);
+
 export const parseZodValidationSchemaDefinition = (
   input: ZodValidationSchemaDefinition,
   context: ContextSpec,
@@ -1184,6 +1209,12 @@ export const parseZodValidationSchemaDefinition = (
 
     consts += chunk;
   };
+
+  const shouldCoerceFunction = (fn: string): boolean =>
+    !!coerceTypes &&
+    (Array.isArray(coerceTypes)
+      ? coerceTypes.includes(fn as ZodCoerceType)
+      : COERCIBLE_TYPES.has(fn));
 
   const formatFunctionArgs = (value: unknown): string => {
     if (value === undefined) return '';
@@ -1303,9 +1334,7 @@ export const parseZodValidationSchemaDefinition = (
         const mergedObjectString = `zod.${objectType}({
 ${Object.entries(mergedProperties)
   .map(([key, schema]) => {
-    const value = schema.functions
-      .map((prop) => parseProperty(prop, [...fieldPath, key]))
-      .join('');
+    const value = parseFunctions(schema.functions, [...fieldPath, key]);
     appendConstsChunk(schema.consts.join('\n'));
     return `  "${key}": ${value.startsWith('.') ? 'zod' : ''}${value}`;
   })
@@ -1323,9 +1352,7 @@ ${Object.entries(mergedProperties)
       // Fallback to original .and() approach for non-object or non-strict cases
       let acc = '';
       for (const partSchema of allOfArgs) {
-        const value = partSchema.functions
-          .map((prop) => parseProperty(prop, fieldPath))
-          .join('');
+        const value = parseFunctions(partSchema.functions, fieldPath);
         const valueWithZod = `${value.startsWith('.') ? 'zod' : ''}${value}`;
 
         if (partSchema.consts.length > 0) {
@@ -1346,9 +1373,7 @@ ${Object.entries(mergedProperties)
       // Can't use zod.union() with a single item
       if (unionArgs.length === 1) {
         appendConstsChunk(unionArgs[0].consts.join('\n'));
-        return unionArgs[0].functions
-          .map((prop: [string, unknown]) => parseProperty(prop, fieldPath))
-          .join('');
+        return parseFunctions(unionArgs[0].functions, fieldPath);
       }
 
       const union = unionArgs.map(
@@ -1359,9 +1384,7 @@ ${Object.entries(mergedProperties)
           functions: [string, unknown][];
           consts: string[];
         }) => {
-          const value = functions
-            .map((prop) => parseProperty(prop, fieldPath))
-            .join('');
+          const value = parseFunctions(functions, fieldPath);
           const valueWithZod = `${value.startsWith('.') ? 'zod' : ''}${value}`;
           // consts are missing here
           appendConstsChunk(argConsts.join('\n'));
@@ -1374,9 +1397,10 @@ ${Object.entries(mergedProperties)
 
     if (fn === 'additionalProperties') {
       const additionalPropertiesArgs = args as ZodValidationSchemaDefinition;
-      const value = additionalPropertiesArgs.functions
-        .map((prop: [string, unknown]) => parseProperty(prop, fieldPath))
-        .join('');
+      const value = parseFunctions(
+        additionalPropertiesArgs.functions,
+        fieldPath,
+      );
       const valueWithZod = `${value.startsWith('.') ? 'zod' : ''}${value}`;
       if (Array.isArray(additionalPropertiesArgs.consts)) {
         appendConstsChunk(additionalPropertiesArgs.consts.join('\n'));
@@ -1396,9 +1420,7 @@ ${Object.entries(mergedProperties)
       const parsedObject = `zod.${objectType}({
 ${Object.entries(objectArgs)
   .map(([key, schema]) => {
-    const value = schema.functions
-      .map((prop) => parseProperty(prop, [...fieldPath, key]))
-      .join('');
+    const value = parseFunctions(schema.functions, [...fieldPath, key]);
     appendConstsChunk(schema.consts.join('\n'));
     return `  "${key}": ${value.startsWith('.') ? 'zod' : ''}${value}`;
   })
@@ -1418,9 +1440,7 @@ ${Object.entries(objectArgs)
 
     if (fn === 'array') {
       const arrayArgs = args as ZodValidationSchemaDefinition;
-      const value = arrayArgs.functions
-        .map((prop: [string, unknown]) => parseProperty(prop, fieldPath))
-        .join('');
+      const value = parseFunctions(arrayArgs.functions, fieldPath);
       if (isString(arrayArgs.consts)) {
         appendConstsChunk(arrayArgs.consts);
       } else if (Array.isArray(arrayArgs.consts)) {
@@ -1436,23 +1456,19 @@ ${Object.entries(objectArgs)
     if (fn === 'tuple') {
       return `zod.tuple([${(args as ZodValidationSchemaDefinition[])
         .map((x) => {
-          const value = x.functions
-            .map((prop) => parseProperty(prop, fieldPath))
-            .join('');
+          const value = parseFunctions(x.functions, fieldPath);
           return `${value.startsWith('.') ? 'zod' : ''}${value}`;
         })
         .join(',\n')}])`;
     }
     if (fn === 'rest') {
-      return `.rest(zod${(args as ZodValidationSchemaDefinition).functions
-        .map((prop) => parseProperty(prop, fieldPath))
-        .join('')})`;
+      const value = parseFunctions(
+        (args as ZodValidationSchemaDefinition).functions,
+        fieldPath,
+      );
+      return `.rest(${value.startsWith('.') ? 'zod' : ''}${value})`;
     }
-    const shouldCoerceType =
-      coerceTypes &&
-      (Array.isArray(coerceTypes)
-        ? coerceTypes.includes(fn as ZodCoerceType)
-        : COERCIBLE_TYPES.has(fn));
+    const shouldCoerceType = shouldCoerceFunction(fn);
 
     const formattedArgs = formatFunctionArgs(args);
     const paramsArg = buildParamsArg(fn, fieldPath);
@@ -1481,9 +1497,46 @@ ${Object.entries(objectArgs)
     return `.${fn}(${combinedArgs})`;
   };
 
+  const parseFunctions = (
+    functions: [string, unknown][],
+    fieldPath: readonly string[] = [],
+  ): string => {
+    const firstFunctionName = functions[0]?.[0];
+    const nextFunction = functions[1];
+    const nextFunctionName = nextFunction?.[0];
+    const shouldUseTopLevelStringFormat =
+      isZodV4 &&
+      firstFunctionName === 'string' &&
+      nextFunctionName &&
+      ZOD_V4_TOP_LEVEL_STRING_FORMATS.has(nextFunctionName);
+
+    if (
+      shouldUseTopLevelStringFormat &&
+      shouldCoerceFunction('string') &&
+      nextFunction
+    ) {
+      const coercedString = parseProperty(functions[0], fieldPath);
+      const formatValidator = `zod${parseProperty(nextFunction, fieldPath)}`;
+      const rest = functions
+        .slice(2)
+        .map((prop) => parseProperty(prop, fieldPath))
+        .join('');
+
+      return `${coercedString}.pipe(${formatValidator})${rest}`;
+    }
+
+    const normalizedFunctions = shouldUseTopLevelStringFormat
+      ? functions.slice(1)
+      : functions;
+
+    return normalizedFunctions
+      .map((prop) => parseProperty(prop, fieldPath))
+      .join('');
+  };
+
   appendConstsChunk(input.consts.join('\n'));
 
-  const schema = input.functions.map((prop) => parseProperty(prop)).join('');
+  const schema = parseFunctions(input.functions);
   const value = preprocess
     ? `.preprocess(${preprocess.name}, ${
         schema.startsWith('.') ? 'zod' : ''
