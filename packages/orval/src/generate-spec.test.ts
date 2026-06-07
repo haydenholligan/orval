@@ -114,6 +114,63 @@ describe('generateSpec - schemas: false', () => {
   });
 });
 
+describe('generateSpec - workspace index with zod tags-split', () => {
+  it('does not export the skipped inline schemas file (#3108)', async () => {
+    const workspace = await createTempWorkspace();
+    const workspaceDir = path.join(workspace, 'src', 'client');
+    const indexFile = path.join(workspaceDir, 'index.ts');
+    const skippedSchemasFile = path.join(
+      workspaceDir,
+      'hooks',
+      'swaggerPetstore.schemas.zod.ts',
+    );
+
+    try {
+      const spec = {
+        ...PETSTORE_SPEC,
+        info: { title: 'Swagger Petstore', version: '1.0.0' },
+      } satisfies OpenApiDocument;
+      const clientOptions = await normalizeOptions(
+        {
+          input: { target: spec },
+          output: {
+            workspace: './src/client',
+            target: './hooks',
+            schemas: './models',
+            mode: 'tags-split',
+            client: 'react-query',
+          },
+        },
+        workspace,
+      );
+      const zodOptions = await normalizeOptions(
+        {
+          input: { target: spec },
+          output: {
+            workspace: './src/client',
+            target: './hooks',
+            mode: 'tags-split',
+            client: 'zod',
+            fileExtension: '.zod.ts',
+          },
+        },
+        workspace,
+      );
+
+      await generateSpec(workspace, clientOptions);
+      await generateSpec(workspace, zodOptions);
+
+      const indexContent = await fs.readFile(indexFile, 'utf8');
+
+      expect(await fs.pathExists(skippedSchemasFile)).toBe(false);
+      expect(indexContent).not.toContain('./hooks/swaggerPetstore.schemas.zod');
+      expect(indexContent).not.toContain('.schemas.zod');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('generateSpec - generateReusableSchemas inline (single mode)', () => {
   // Regression for #3463 follow-up: with `client: 'zod'` +
   // `generateReusableSchemas` + operations + no `schemas:` dir, operations

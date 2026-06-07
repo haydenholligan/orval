@@ -305,6 +305,13 @@ function shouldGenerateSchemas(
   );
 }
 
+function isOptionalInlineSchemasPath(
+  implementationPath: string,
+  fileExtension: string,
+): boolean {
+  return implementationPath.endsWith(`.schemas${fileExtension}`);
+}
+
 export async function writeSpecs(
   builder: WriteSpecBuilder,
   workspace: string,
@@ -531,12 +538,32 @@ export async function writeSpecs(
   if (output.workspace) {
     const workspacePath = output.workspace;
     const indexFile = path.join(workspacePath, 'index.ts');
+    implementationPaths = (
+      await Promise.all(
+        implementationPaths.map(async (implementationPath) => {
+          if (
+            !isOptionalInlineSchemasPath(
+              implementationPath,
+              output.fileExtension,
+            )
+          ) {
+            return implementationPath;
+          }
+
+          return (await fs.pathExists(implementationPath))
+            ? implementationPath
+            : '';
+        }),
+      )
+    ).filter(Boolean);
+
     // Skip per-mock-entry output files when emitting the workspace index.
     // The cleanup pass removes any path matching `.<ext>.ts` for every
     // configured generator's extension (`msw`, `faker`, etc.).
     const mockExtensions = output.mock.generators.map((g) =>
       getMockFileExtensionByTypeName(g),
     );
+
     const imports = implementationPaths
       .filter(
         (p) =>
