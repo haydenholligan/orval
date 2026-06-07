@@ -11,6 +11,7 @@ import { generateMSW } from './index';
 describe('generateMSW', () => {
   const mockVerbOptions = {
     operationId: 'getUser',
+    operationName: 'getUser',
     verb: 'get',
     tags: [],
     response: {
@@ -153,6 +154,59 @@ describe('generateMSW', () => {
         'export const getGetUserMockHandler',
       );
       expect(result.implementation.handler).toContain('return http.get');
+    });
+
+    it('should use operationName for split content type handler names', () => {
+      const splitResponseVerbOptions = {
+        ...mockVerbOptions,
+        operationId: 'createEvent',
+        response: {
+          ...mockVerbOptions.response,
+          definition: { success: 'number' },
+          types: { success: [{ key: '201', value: 'number' }] },
+          contentTypes: ['application/json'],
+        },
+      } as GeneratorVerbOptions;
+      const jsonResult = generateMSW(
+        {
+          ...splitResponseVerbOptions,
+          operationName: 'createEventWithJson',
+        },
+        baseOptions,
+      );
+      const formDataResult = generateMSW(
+        {
+          ...splitResponseVerbOptions,
+          operationName: 'createEventWithFormData',
+        },
+        baseOptions,
+      );
+
+      expect(jsonResult.implementation.handlerName).toBe(
+        'getCreateEventWithJsonMockHandler',
+      );
+      expect(formDataResult.implementation.handlerName).toBe(
+        'getCreateEventWithFormDataMockHandler',
+      );
+      expect(jsonResult.implementation.function).toContain(
+        'getCreateEventWithJsonResponseMock',
+      );
+      expect(formDataResult.implementation.function).toContain(
+        'getCreateEventWithFormDataResponseMock',
+      );
+
+      const exportNames = [
+        ...jsonResult.implementation.function.matchAll(/export const (\w+)/g),
+        ...jsonResult.implementation.handler.matchAll(/export const (\w+)/g),
+        ...formDataResult.implementation.function.matchAll(
+          /export const (\w+)/g,
+        ),
+        ...formDataResult.implementation.handler.matchAll(
+          /export const (\w+)/g,
+        ),
+      ].map((match) => match[1]);
+
+      expect(new Set(exportNames).size).toBe(exportNames.length);
     });
 
     it('should not include JSON.stringify in handler (uses HttpResponse.json or null body)', () => {

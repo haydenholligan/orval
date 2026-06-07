@@ -435,7 +435,7 @@ export function generateMSW(
   generatorOptions: GeneratorOptions,
 ): ClientMockGeneratorBuilder {
   const { pathRoute, override, mock } = generatorOptions;
-  const { operationId, response } = generatorVerbOptions;
+  const { operationName, response } = generatorVerbOptions;
 
   const overrideBaseUrl =
     override.mock && 'baseUrl' in override.mock
@@ -444,8 +444,9 @@ export function generateMSW(
   const mockBaseUrl = mock && isMswMock(mock) ? mock.baseUrl : undefined;
   const route = getRouteMSW(pathRoute, overrideBaseUrl ?? mockBaseUrl);
 
-  const handlerName = `get${pascal(operationId)}MockHandler`;
-  const getResponseMockFunctionName = `get${pascal(operationId)}ResponseMock`;
+  const mockName = operationName;
+  const handlerName = `get${pascal(mockName)}MockHandler`;
+  const getResponseMockFunctionName = `get${pascal(mockName)}ResponseMock`;
 
   const splitMockImplementations: string[] = [];
 
